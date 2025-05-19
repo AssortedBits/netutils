@@ -1,72 +1,83 @@
 #requires -version 7
 
+using module "./NetUtils.psm1"
+
 param (
     [Parameter(Mandatory = $true)][string]$mac,
-    [Parameter(Mandatory = $true)][string]$lowIp,
-    [Parameter(Mandatory = $true)][byte]$hiQuad
+    [Parameter(Mandatory = $true)][string]$networkAddress,
+    [Parameter(Mandatory = $true)][string]$netmask
 )
 
 
 class FindIpByMAC {
 
-    static [string] Do([string]$mac, [System.Net.IPAddress]$ipRangeLow, [byte]$lastQuadHigh) {
+    static [void] ThrowIfInvalidParams([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
 
         if ("" -eq $mac) {
-            [string]$errStr = "no MAC address supplied"
-            Write-Host $errStr
-            throw $errStr
+            [NetUtils]::ComplainAndThrow("no MAC address supplied")
         }
 
-        if ($null -eq $ipRangeLow) {
-            [string]$errStr = "no IP address range lower bound supplied"
-            Write-Host $errStr
-            throw $errStr
+        if ($null -eq $networkIp) {
+            [NetUtils]::ComplainAndThrow("no network IP address supplied")
         }
 
-        if ("" -eq $lastQuadHigh) {
-            [string]$errStr = "no IP address range upper bound supplied"
-            Write-Host $errStr
-            throw $errStr
+        if ($null -eq $netmask) {
+            [NetUtils]::ComplainAndThrow("no netmask supplied")
         }
 
-        if ($ipRangeLow.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
-            [string]$errStr = "lower-bound IP address is not v4, and this script doesn't support other versions."
-            Write-Host $errStr
-            throw $errStr
-        }
+        [NetUtils]::ThrowIfNotV4($networkIp)
+        [NetUtils]::ThrowIfNotV4($netmask)
+        [NetUtils]::ThrowIfNetworkAddressAndNetmaskDisagree($networkIp, $netmask)
+    }
 
-        foreach ($myByte in ($ipRangeLow.GetAddressBytes() + $lastQuadHigh)) {
-            if ($myByte -lt 1 -or $myByte -gt 254) {
-                [string]$errStr = "input address range transgressed onto a 0 or a 255 somewhere"
-                Write-Host $errStr
-                throw $errStr
+    static [void] ThrowIfAnythingElseLooksDangerous([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
+
+        [System.Net.IPAddress]$probableGatewayIp = [NetUtils]::GetFirstValidHostIp($networkIp)
+        if (-not [NetUtils]::IsIpUp($probableGatewayIp)) {
+            [NetUtils]::ComplainAndThrow("Probable gateway '$probableGatewayIp' didn't respond to ping. Since this script risks angering your IT dept if misused, we're stopping now as a precaution.")
+        }
+    }
+
+    static [string] Do([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
+
+        [FindIpByMAC]::ThrowIfInvalidParams($mac, $networkIp, $netmask)
+
+        [FindIpByMAC]::ThrowIfAnythingElseLooksDangerous($mac, $networkIp, $netmask)
+
+        $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
+        $moduleCode = Get-Content -Path $modulePath -Raw
+
+        #We do a loop instead of a range, in case the range is big enough that we want to avoid
+        # instantiating it as an array in memory.
+        [string[]]$foundArr = & {
+
+            [System.Net.IPAddress]$lowIp = [NetUtils]::GetFirstValidHostIp($networkIp)
+            [System.Net.IPAddress]$highIp = [NetUtils]::GetLastValidHostIp($networkIp, $netmask)
+
+            [UInt32]$lowIpInt = [NetUtils]::ToInt($lowIp)
+            [UInt32]$highIpInt = [NetUtils]::ToInt($highIp)
+
+            for ([UInt32]$ipInt = $lowIpInt; $ipInt -le $highIpInt; $ipInt++) {
+                [System.Net.IPAddress]$ip = [NetUtils]::ToIp($ipInt)
+                Write-Output $ip
             }
-        }
+        } |
+        ForEach-Object -Parallel {
 
-        [byte]$lastQuadLow = $ipRangeLow.GetAddressBytes()[-1]
+            [System.Net.IPAddress]$ip = $_
 
-        if ($lastQuadLow -gt $lastQuadHigh) {
-            [string]$errStr = "lower bound is above upper bound"
-            Write-Host $errStr
-            throw $errStr
-        }
+            #Because of some devilish mysterious behavior on my machine,
+            # Import-Module will not work (fails silently), in any context,
+            # even with a minimal boilerplate example, no matter how many
+            # Copilot instructions I follow.
+            #Import-Module $using:modulePath
+            Invoke-Expression $using:moduleCode
 
-        [byte[]]$firstThreeQuads = $ipRangeLow.GetAddressBytes()[0..2]
-
-        [string[]]$foundArr = `
-            $lastQuadLow..$lastQuadHigh `
-        | ForEach-Object -Parallel {
-            [string]$ip = [System.Net.IPAddress]::new($using:firstThreeQuads + $_).ToString()
-            [bool]$foundIp = Test-Connection -Quiet -ComputerName $ip -Count 1 -TimeoutSeconds 1 2>$null
-            if ($foundIp) {
-                [string[]]$arpStr = arp -a $ip
-                [bool]$matchesMac = $arpStr | Select-String -Quiet "$using:mac"
-                if ($matchesMac) {
-                    Write-Output $ip
-                }
+            if ([NetUtils]::IpHasMAC($ip, $using:mac)) {
+                Write-Output $ip
             }
-        } -ThrottleLimit 20 `
-        | Select-Object -First 1
+        } -ThrottleLimit 20 |
+        Select-Object -First 1       
 
         if ($foundArr.Count -lt 1) {
             Write-Host "no network device in the given IP range with given MAC responded to pings within one second"
@@ -78,6 +89,5 @@ class FindIpByMAC {
 
 }
 
-
-[FindIpByMAC]::Do($mac, [System.Net.IPAddress]::Parse($lowIp), $hiQuad)
+[FindIpByMAC]::Do($mac, [System.Net.IPAddress]::Parse($networkAddress), [System.Net.IPAddress]::Parse($netmask))
 
