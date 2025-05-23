@@ -10,18 +10,7 @@ param (
 
 class FindIpByMAC {
 
-    static [void] ThrowIfInvalidParams([string]$mac, [Subnet]$subnet) {
-
-        if ("" -eq $mac) {
-            [NetUtils]::ComplainAndThrow("no MAC address supplied")
-        }
-
-        if ($null -eq $subnet) {
-            [NetUtils]::ComplainAndThrow("no subnet supplied")
-        }
-    }
-
-    static [void] ThrowIfAnythingElseLooksDangerous([string]$mac, [Subnet]$subnet) {
+    static [void] ThrowIfAnythingLooksDangerous([string]$mac, [Subnet]$subnet) {
 
         [System.Net.IPAddress]$probableGatewayIp = $subnet.GetFirstValidHostIp()
         if (-not [NetUtils]::IsIpUp($probableGatewayIp)) {
@@ -31,9 +20,7 @@ class FindIpByMAC {
 
     static [string] Do([string]$mac, [Subnet]$subnet) {
 
-        [FindIpByMAC]::ThrowIfInvalidParams($mac, $subnet)
-
-        [FindIpByMAC]::ThrowIfAnythingElseLooksDangerous($mac, $subnet)
+        [FindIpByMAC]::ThrowIfAnythingLooksDangerous($mac, $subnet)
 
         $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
         $moduleCode = Get-Content -Path $modulePath -Raw
@@ -67,11 +54,11 @@ class FindIpByMAC {
             if ([NetUtils]::IpHasMAC($ip, $using:mac)) {
                 Write-Output $ip
             }
-        } -ThrottleLimit 20 |
+        } -ThrottleLimit 127 |
         Select-Object -First 1       
 
         if ($foundArr.Count -lt 1) {
-            Write-Host "no network device in the given IP range with given MAC responded to pings within one second"
+            Write-Host "no network device on the given subnet with given MAC address responded to pings within one second"
             exit 1;
         }
         
