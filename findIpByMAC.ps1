@@ -4,45 +4,36 @@ using module "./NetUtils.psm1"
 
 param (
     [Parameter(Mandatory = $true)][string]$mac,
-    [Parameter(Mandatory = $true)][string]$networkAddress,
-    [Parameter(Mandatory = $true)][string]$netmask
+    [Parameter(Mandatory = $true)][string]$subnet
 )
 
 
 class FindIpByMAC {
 
-    static [void] ThrowIfInvalidParams([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
+    static [void] ThrowIfInvalidParams([string]$mac, [Subnet]$subnet) {
 
         if ("" -eq $mac) {
             [NetUtils]::ComplainAndThrow("no MAC address supplied")
         }
 
-        if ($null -eq $networkIp) {
-            [NetUtils]::ComplainAndThrow("no network IP address supplied")
+        if ($null -eq $subnet) {
+            [NetUtils]::ComplainAndThrow("no subnet supplied")
         }
-
-        if ($null -eq $netmask) {
-            [NetUtils]::ComplainAndThrow("no netmask supplied")
-        }
-
-        [NetUtils]::ThrowIfNotV4($networkIp)
-        [NetUtils]::ThrowIfNotV4($netmask)
-        [NetUtils]::ThrowIfNetworkAddressAndNetmaskDisagree($networkIp, $netmask)
     }
 
-    static [void] ThrowIfAnythingElseLooksDangerous([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
+    static [void] ThrowIfAnythingElseLooksDangerous([string]$mac, [Subnet]$subnet) {
 
-        [System.Net.IPAddress]$probableGatewayIp = [NetUtils]::GetFirstValidHostIp($networkIp)
+        [System.Net.IPAddress]$probableGatewayIp = $subnet.GetFirstValidHostIp()
         if (-not [NetUtils]::IsIpUp($probableGatewayIp)) {
             [NetUtils]::ComplainAndThrow("Probable gateway '$probableGatewayIp' didn't respond to ping. Since this script risks angering your IT dept if misused, we're stopping now as a precaution.")
         }
     }
 
-    static [string] Do([string]$mac, [System.Net.IPAddress]$networkIp, [System.Net.IPAddress]$netmask) {
+    static [string] Do([string]$mac, [Subnet]$subnet) {
 
-        [FindIpByMAC]::ThrowIfInvalidParams($mac, $networkIp, $netmask)
+        [FindIpByMAC]::ThrowIfInvalidParams($mac, $subnet)
 
-        [FindIpByMAC]::ThrowIfAnythingElseLooksDangerous($mac, $networkIp, $netmask)
+        [FindIpByMAC]::ThrowIfAnythingElseLooksDangerous($mac, $subnet)
 
         $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
         $moduleCode = Get-Content -Path $modulePath -Raw
@@ -51,8 +42,8 @@ class FindIpByMAC {
         # instantiating it as an array in memory.
         [string[]]$foundArr = & {
 
-            [System.Net.IPAddress]$lowIp = [NetUtils]::GetFirstValidHostIp($networkIp)
-            [System.Net.IPAddress]$highIp = [NetUtils]::GetLastValidHostIp($networkIp, $netmask)
+            [System.Net.IPAddress]$lowIp = $subnet.GetFirstValidHostIp()
+            [System.Net.IPAddress]$highIp = $subnet.GetLastValidHostIp()
 
             [UInt32]$lowIpInt = [NetUtils]::ToInt($lowIp)
             [UInt32]$highIpInt = [NetUtils]::ToInt($highIp)
@@ -89,5 +80,5 @@ class FindIpByMAC {
 
 }
 
-[FindIpByMAC]::Do($mac, [System.Net.IPAddress]::Parse($networkAddress), [System.Net.IPAddress]::Parse($netmask))
+[FindIpByMAC]::Do($mac, [Subnet]::FromCIDR($subnet))
 
