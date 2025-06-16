@@ -202,6 +202,10 @@ class Subnet {
         return [System.Net.IPAddress]::new($this.ToBytes())
     }
 
+    [uint] GetNumNetmaskBits() {
+        return $this.networkBits.Count
+    }
+
     [System.Net.IPAddress] GetBroadcastAddress() {
         return `
             [System.Net.IPAddress]::new( `
@@ -260,7 +264,7 @@ class Subnet {
 
         [byte]$prefixLength = [Byte]::Parse($parts[1])
         if ($prefixLength -lt 0 -or $prefixLength -gt 32) {
-            throw "Invalid prefix length: $prefixLength"
+            [NetUtils]::ComplainAndThrow("Invalid prefix length: $prefixLength")
         }
 
         [Subnet]::ThrowIfNetworkAddressAndNetmaskDisagree($networkAddress, $prefixLength)
@@ -274,6 +278,21 @@ class Subnet {
         }
 
         return [Subnet]::new($myNetworkBits)
+    }
+
+    static [Subnet[]] Current() {
+
+        return (
+            Get-NetIPConfiguration |
+            Where-Object { $null -ne $_.IPv4DefaultGateway } |
+            Where-Object { $_.NetAdapter.Status -eq "Up" } |
+            Select-Object -ExpandProperty IPv4Address |
+            ForEach-Object { "$($_.IPAddress)/$($_.PrefixLength)" } |
+            ForEach-Object { [Subnet]::FromCIDR($_) } )
+    }
+
+    [string] ToCIDR() {
+        return ($this.GetNetworkAddress().ToString() + "/" + $this.GetNumNetmaskBits())
     }
 
 }

@@ -4,7 +4,8 @@ using module "./NetUtils.psm1"
 
 param (
     [Parameter(Mandatory = $true)][string]$mac,
-    [Parameter(Mandatory = $true)][string]$subnet
+    [Parameter(Mandatory = $false)][string]$subnet,
+    [Parameter(Mandatory = $false)][bool]$throttleForWifi = $false
 )
 
 
@@ -18,9 +19,27 @@ class FindIpByMAC {
         }
     }
 
-    static [string] Do([string]$mac, [Subnet]$subnet) {
+    static [string] Do([string]$mac, [string]$subnetStr, [bool]$throttleForWifi) {
+
+        [Subnet]$subnet = $null
+
+        if ( $null -ne $subnetStr -and $subnetStr.Length -gt 0) {
+            $subnet = [Subnet]::FromCIDR($subnetStr)
+        }
+        else {
+            Write-Host -NoNewline "No subnet supplied. Deducing..."
+            [Subnet[]]$subnets = [Subnet]::Current()
+            if ($subnets.Count -eq 0) {
+                [NetUtils]::ComplainAndThrow("no subnet supplied, and failed to deduce one automatically")
+            }
+            $subnet = $subnets[0]
+
+            Write-Host (" " + $subnet.ToCIDR() + "`nIf this is the wrong network adapter, then rerun and specify the subnet explicitly.")
+        }
 
         [FindIpByMAC]::ThrowIfAnythingLooksDangerous($mac, $subnet)
+
+        [uint]$nParallel = $throttleForWifi ? 8 : 127
 
         $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
         $moduleCode = Get-Content -Path $modulePath -Raw
@@ -54,7 +73,7 @@ class FindIpByMAC {
             if ([NetUtils]::IpHasMAC($ip, $using:mac)) {
                 Write-Output $ip
             }
-        } -ThrottleLimit 127 |
+        } -ThrottleLimit $nParallel |
         Select-Object -First 1       
 
         if ($foundArr.Count -lt 1) {
@@ -67,5 +86,9 @@ class FindIpByMAC {
 
 }
 
-[FindIpByMAC]::Do($mac, [Subnet]::FromCIDR($subnet))
+if (-not $PSBoundParameters.ContainsKey('throttleForWifi')) {
+    Write-Host "Using heavy parallelism. pass `-throttleForWifi `$true if this causes your WiFi to disconnect"
+}
+
+[FindIpByMAC]::Do($mac, $subnet, $throttleForWifi)
 
