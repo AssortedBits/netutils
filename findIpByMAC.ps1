@@ -44,6 +44,8 @@ class FindIpByMAC {
         $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
         $moduleCode = Get-Content -Path $modulePath -Raw
 
+        Write-Host ("Scanning subnet " + $subnet.ToCIDR() + " for MAC address $mac ...")
+
         #We do a loop instead of a range, in case the range is big enough that we want to avoid
         # instantiating it as an array in memory.
         [string[]]$foundArr = & {
@@ -62,6 +64,8 @@ class FindIpByMAC {
         ForEach-Object -Parallel {
 
             [System.Net.IPAddress]$ip = $_
+            [Subnet]$subnet = $using:subnet
+            [string]$mac = $using:mac
 
             #Because of some devilish mysterious behavior on my machine,
             # Import-Module will not work (fails silently), in any context,
@@ -70,14 +74,14 @@ class FindIpByMAC {
             #Import-Module $using:modulePath
             Invoke-Expression $using:moduleCode
 
-            if ([NetUtils]::IpHasMAC($ip, $using:mac)) {
-                Write-Output $ip
+            if ([NetUtils]::IpHasMAC($ip, $mac)) {
+                Write-Output "Found $mac at: $ip"
             }
         } -ThrottleLimit $nParallel |
         Select-Object -First 1       
 
         if ($foundArr.Count -lt 1) {
-            Write-Host "no network device on the given subnet with given MAC address responded to pings within one second"
+            Write-Host ("`No network device on subnet " + $subnet.ToCIDR() + " with MAC address $mac responded to pings within one second.")
             exit 1;
         }
         
