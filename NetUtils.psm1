@@ -1,22 +1,6 @@
-using module ./ArpTools.runtime_defined.psm1
+using module ./ArpTools.psm1
 
 #requires -version 7
-
-#Due to the order in which PowerShell does compilation vs execution,
-# the type that ArpTools module exports at run-time cannot be used
-# in class member functions. Instead, we need to wrap invocations
-# in non-class-member functions.
-
-function Get-MacViaArp {
-    param(
-        [Parameter(Mandatory)]
-        [System.Net.IPAddress]$IpAddress
-    )
-
-    #returns a [System.Net.NetworkInformation.PhysicalAddress]
-    return [ArpTools]::GetMac($ip)
-}
-
 
 
 class NetUtils {
@@ -168,8 +152,17 @@ class NetUtils {
         return $output
     }
 
-    static [System.Net.NetworkInformation.PhysicalAddress] GetMac([System.Net.IPAddress]$ip) {
-        return [System.Net.NetworkInformation.PhysicalAddress](Get-MacViaArp -IpAddress $ip)
+    static [System.Net.IPAddress] GetIpOfMac(
+        [Subnet]$subnet,
+        [System.Net.NetworkInformation.PhysicalAddress]$mac,
+        [bool]$throttleForWifi = $false
+    ) {
+        return [System.Net.IPAddress](
+            Find-IpByMac `
+                -StartIp $subnet.GetFirstValidHostIp() `
+                -EndIp $subnet.GetLastValidHostIp() `
+                -Mac $mac `
+                -ThrottleForWifi $throttleForWifi)
     }
 
 }

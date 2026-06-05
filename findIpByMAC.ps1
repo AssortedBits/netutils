@@ -4,7 +4,8 @@ using module ./NetUtils.psm1   # must be before any executable code
 
 param (
     [Parameter(Mandatory = $true)][string]$mac,
-    [Parameter(Mandatory = $false)][string]$subnet
+    [Parameter(Mandatory = $false)][string]$subnet,
+    [Parameter(Mandatory = $false)][bool]$throttleForWifi = $false
 )
 
 
@@ -18,7 +19,7 @@ class FindIpByMAC {
         }
     }
 
-    static [string] Do([string]$macStr, [string]$subnetStr) {
+    static [string] Do([string]$macStr, [string]$subnetStr, [bool]$throttleForWifi) {
 
         [System.Net.NetworkInformation.PhysicalAddress]$mac = [System.Net.NetworkInformation.PhysicalAddress]::Parse($macStr)
 
@@ -42,44 +43,9 @@ class FindIpByMAC {
 
         Write-Host ("Scanning subnet " + $subnet.ToCIDR() + " for MAC address " + $mac.ToString() + "...")
 
-        [int]$logBatchSize = 10
-
-        [bool]$done = $false
-
         #We do a loop instead of a range, in case the range is big enough that we want to avoid
         # instantiating it as an array in memory.
-        [System.Net.IPAddress]$foundIp = & {
-            [System.Net.IPAddress]$lowIp = $subnet.GetFirstValidHostIp()
-            [System.Net.IPAddress]$highIp = $subnet.GetLastValidHostIp()
-
-            [UInt32]$lowIpInt = [NetUtils]::ToInt($lowIp)
-            [UInt32]$highIpInt = [NetUtils]::ToInt($highIp)
-
-            for ([UInt32]$ipInt = $lowIpInt; $ipInt -le $highIpInt; $ipInt++) {
-                [System.Net.IPAddress]$ip = [NetUtils]::ToIp($ipInt)
-                Write-Output $ip
-
-                if (($ipInt - $lowIpInt) % $logBatchSize -eq 0) {
-                    Write-Host ("progress: " + $ip.ToString() + "...")
-                }
-            }
-        } |
-        ForEach-Object {
-
-            [System.Net.IPAddress]$ip = $_
-
-            #Skip remaining iters after success.
-            if ($done) {
-                return
-            }
-
-            [System.Net.NetworkInformation.PhysicalAddress]$foundMac = [NetUtils]::GetMac($ip)
-            if ($null -ne $foundMac -and $foundMac.ToString() -eq $mac.ToString()) {
-                return $ip
-            }
-        } |
-        #Causes PowerShell to cancel iterations that haven't started yet.
-        Select-Object -First 1       
+        [System.Net.IPAddress]$foundIp = [NetUtils]::GetIpOfMac($subnet, $mac, $throttleForWifi)
 
         if ($null -eq $foundIp) {
             Write-Host ("`Network on subnet " + $subnet.ToCIDR() + " did not respond with any IP address after ARP request for MAC address " + $mac.ToString() + ".")
@@ -91,5 +57,9 @@ class FindIpByMAC {
 
 }
 
-[FindIpByMAC]::Do($mac, $subnet)
+if (-not $PSBoundParameters.ContainsKey('throttleForWifi')) {
+    Write-Host "Using heavy parallelism. pass `-throttleForWifi `$true if this causes your WiFi to disconnect"
+}
+
+[FindIpByMAC]::Do($mac, $subnet, $throttleForWifi)
 
