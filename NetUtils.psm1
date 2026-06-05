@@ -1,4 +1,22 @@
+using module ./ArpTools.runtime_defined.psm1
+
 #requires -version 7
+
+#Due to the order in which PowerShell does compilation vs execution,
+# the type that ArpTools module exports at run-time cannot be used
+# in class member functions. Instead, we need to wrap invocations
+# in non-class-member functions.
+
+function Get-MacViaArp {
+    param(
+        [Parameter(Mandatory)]
+        [System.Net.IPAddress]$IpAddress
+    )
+
+    #returns a [System.Net.NetworkInformation.PhysicalAddress]
+    return [ArpTools]::GetMac($ip)
+}
+
 
 
 class NetUtils {
@@ -139,10 +157,6 @@ class NetUtils {
         return $result
     }
 
-    static [bool] AddToMACLookupTable([System.Net.IPAddress]$ip) {
-        return [NetUtils]::IsIpUp($ip)
-    }
-
     static [void] ThrowIfNotV4([System.Net.IPAddress]$ip) {
         if ($ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
             [NetUtils]::ComplainAndThrow("IP address '$ip' is not v4, and this script doesn't support other versions.")
@@ -154,17 +168,8 @@ class NetUtils {
         return $output
     }
 
-    static [bool] IpHasMAC([System.Net.IPAddress]$ip, [string]$mac) {
-
-        [bool]$foundIp = [NetUtils]::AddToMACLookupTable($ip)
-        if (-not $foundIp) {
-            return $false
-        }
-
-        [string]$normalizedMAC = $mac -replace ":", "-"
-
-        [string[]]$arpStr = [NetUtils]::GetTableEntryForIp($ip)
-        return ($arpStr | Select-String -Quiet "$normalizedMAC")
+    static [System.Net.NetworkInformation.PhysicalAddress] GetMac([System.Net.IPAddress]$ip) {
+        return [System.Net.NetworkInformation.PhysicalAddress](Get-MacViaArp -IpAddress $ip)
     }
 
 }
