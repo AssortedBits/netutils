@@ -43,30 +43,31 @@ public static class ArpTools
         IPAddress? foundIp = null;
         object lockObj = new();
 
+        // Log immediately when the external token (PipelineStopToken) is cancelled
+        using var externalCancelRegistration = externalCt.CanBeCanceled
+            ? externalCt.Register(() =>
+            {
+                Console.WriteLine("Cancelling...");
+            })
+            : default;
+
         // Signal when all tasks have completed
         var tcs = new TaskCompletionSource<object?>();
         int remaining = 0;
 
-        // track whether we've already logged external cancellation
-        bool externalCancelLogged = false;
-
         for (uint addr = startUInt; addr <= endUInt; addr++)
         {
-            var ip    = FromOrderedUInt32(addr);
+            var ip = FromOrderedUInt32(addr);
 
-            // If pipeline token is cancelled (Ctrl-C), stop queuing new work
-            if (externalCt.IsCancellationRequested)
-            {
-                if (!externalCancelLogged)
-                {
-                    Console.WriteLine($"Cancelling before trying {ip} ...");
-                    externalCancelLogged = true;
-                }
-                break; // stop queuing new work
+            //If pipeline token is cancelled due to Ctrl-C, stop queuing new work.
+            if (externalCt.IsCancellationRequested) {
+                Console.WriteLine($"...stopped somewhere before {ip}");
+                break;
             }
 
-            //Stop queueing new work if we've already succeeded.
-            if (ct.IsCancellationRequested)
+            //If pipeline token is cancelled due to success, stop queuing new work.
+            //(Can't check this earlier, because this ct will also fire under ctrl-c.)
+            if(ct.IsCancellationRequested)
                 break;
 
             int index = (int)(addr - startUInt);
