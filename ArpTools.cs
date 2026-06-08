@@ -33,7 +33,8 @@ public static class ArpTools
         if (endUInt < startUInt)
             throw new ArgumentException("End IP must be >= start IP.");
 
-        using var cts = new CancellationTokenSource(); // internal flag only
+        // Internal CTS linked to the external one (Ctrl-C will cancel externalCt)
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
         var ct = cts.Token;
 
         using var semaphore = new SemaphoreSlim(maxConcurrency);
@@ -44,12 +45,13 @@ public static class ArpTools
 
         // Signal when all tasks have completed
         var tcs = new TaskCompletionSource<object?>();
-        int remaining = (int)(endUInt - startUInt + 1);
+        int remaining = 0;
 
         for (uint addr = startUInt; addr <= endUInt; addr++)
         {
+            // If pipeline token is cancelled (Ctrl-C), stop queuing new work
             if (externalCt.IsCancellationRequested)
-                throw new OperationCanceledException(externalCt);
+                break;
 
             var ip    = FromOrderedUInt32(addr);
 
@@ -66,6 +68,9 @@ public static class ArpTools
 
             await semaphore.WaitAsync().ConfigureAwait(false);
 
+            // We are about to start a task -> count it
+            Interlocked.Increment(ref remaining);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -80,7 +85,7 @@ public static class ArpTools
                                 if (foundIp == null)
                                     foundIp = ip;
                             }
-                            cts.Cancel(); // signal others to stop soon
+                            cts.Cancel(); // internal “found it” cancel
                         }
                     }
                 }
@@ -97,6 +102,10 @@ public static class ArpTools
                 }
             });
         }
+
+        // If we never started any tasks (e.g. Ctrl-C before loop / very early), complete tcs
+        if (remaining == 0)
+            tcs.TrySetResult(null);
 
         // Wait for all started tasks to finish
         await tcs.Task.ConfigureAwait(false);

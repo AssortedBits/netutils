@@ -40,8 +40,11 @@ function Find-IpByMac {
         $interProbeDelay = [TimeSpan]::FromMilliseconds(50)
     }
 
+    # Get a CancellationToken that flips when Ctrl-C is pressed
+    [System.Threading.CancellationToken]$token = $PSCmdlet.PipelineStopToken
+
     $task = [ArpTools]::FindByMacAsync(
-        $StartIp, $EndIp, $Mac, $maxConcurrency, $interProbeDelay)
+        $StartIp, $EndIp, $Mac, $maxConcurrency, $interProbeDelay, $token)
 
     $task.GetAwaiter().GetResult()
 }
