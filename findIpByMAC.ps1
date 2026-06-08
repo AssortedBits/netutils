@@ -1,6 +1,6 @@
-#requires -version 7
+using module ./NetUtils.psm1   # must be before any executable code
 
-using module "./NetUtils.psm1"
+#requires -version 7
 
 param (
     [Parameter(Mandatory = $true)][string]$mac,
@@ -11,7 +11,7 @@ param (
 
 class FindIpByMAC {
 
-    static [void] ThrowIfAnythingLooksDangerous([string]$mac, [Subnet]$subnet) {
+    static [void] ThrowIfAnythingLooksDangerous([System.Net.NetworkInformation.PhysicalAddress]$mac, [Subnet]$subnet) {
 
         [System.Net.IPAddress]$probableGatewayIp = $subnet.GetFirstValidHostIp()
         if (-not [NetUtils]::IsIpUp($probableGatewayIp)) {
@@ -19,7 +19,9 @@ class FindIpByMAC {
         }
     }
 
-    static [string] Do([string]$mac, [string]$subnetStr, [bool]$throttleForWifi) {
+    static [string] Do([string]$macStr, [string]$subnetStr, [bool]$throttleForWifi) {
+
+        [System.Net.NetworkInformation.PhysicalAddress]$mac = [System.Net.NetworkInformation.PhysicalAddress]::Parse($macStr)
 
         [Subnet]$subnet = $null
 
@@ -39,53 +41,18 @@ class FindIpByMAC {
 
         [FindIpByMAC]::ThrowIfAnythingLooksDangerous($mac, $subnet)
 
-        [uint]$nParallel = $throttleForWifi ? 8 : 127
-
-        $modulePath = Join-Path -Path $PSScriptRoot -ChildPath 'NetUtils.psm1'
-        $moduleCode = Get-Content -Path $modulePath -Raw
-
-        Write-Host ("Scanning subnet " + $subnet.ToCIDR() + " for MAC address $mac ...")
+        Write-Host ("Scanning subnet " + $subnet.ToCIDR() + " for MAC address " + $mac.ToString() + "...")
 
         #We do a loop instead of a range, in case the range is big enough that we want to avoid
         # instantiating it as an array in memory.
-        [string[]]$foundArr = & {
+        [System.Net.IPAddress]$foundIp = [NetUtils]::GetIpOfMac($subnet, $mac, $throttleForWifi)
 
-            [System.Net.IPAddress]$lowIp = $subnet.GetFirstValidHostIp()
-            [System.Net.IPAddress]$highIp = $subnet.GetLastValidHostIp()
-
-            [UInt32]$lowIpInt = [NetUtils]::ToInt($lowIp)
-            [UInt32]$highIpInt = [NetUtils]::ToInt($highIp)
-
-            for ([UInt32]$ipInt = $lowIpInt; $ipInt -le $highIpInt; $ipInt++) {
-                [System.Net.IPAddress]$ip = [NetUtils]::ToIp($ipInt)
-                Write-Output $ip
-            }
-        } |
-        ForEach-Object -Parallel {
-
-            [System.Net.IPAddress]$ip = $_
-            [Subnet]$subnet = $using:subnet
-            [string]$mac = $using:mac
-
-            #Because of some devilish mysterious behavior on my machine,
-            # Import-Module will not work (fails silently), in any context,
-            # even with a minimal boilerplate example, no matter how many
-            # Copilot instructions I follow.
-            #Import-Module $using:modulePath
-            Invoke-Expression $using:moduleCode
-
-            if ([NetUtils]::IpHasMAC($ip, $mac)) {
-                Write-Output "Found $mac at: $ip"
-            }
-        } -ThrottleLimit $nParallel |
-        Select-Object -First 1       
-
-        if ($foundArr.Count -lt 1) {
-            Write-Host ("`No network device on subnet " + $subnet.ToCIDR() + " with MAC address $mac responded to pings within one second.")
+        if ($null -eq $foundIp) {
+            Write-Host ("`Network on subnet " + $subnet.ToCIDR() + " did not respond with any IP address after ARP request for MAC address " + $mac.ToString() + ".")
             exit 1;
         }
         
-        return $foundArr[0]
+        return $foundIp
     }
 
 }

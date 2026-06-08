@@ -1,3 +1,5 @@
+using module ./ArpTools.psm1
+
 #requires -version 7
 
 
@@ -139,10 +141,6 @@ class NetUtils {
         return $result
     }
 
-    static [bool] AddToMACLookupTable([System.Net.IPAddress]$ip) {
-        return [NetUtils]::IsIpUp($ip)
-    }
-
     static [void] ThrowIfNotV4([System.Net.IPAddress]$ip) {
         if ($ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
             [NetUtils]::ComplainAndThrow("IP address '$ip' is not v4, and this script doesn't support other versions.")
@@ -154,17 +152,17 @@ class NetUtils {
         return $output
     }
 
-    static [bool] IpHasMAC([System.Net.IPAddress]$ip, [string]$mac) {
-
-        [bool]$foundIp = [NetUtils]::AddToMACLookupTable($ip)
-        if (-not $foundIp) {
-            return $false
-        }
-
-        [string]$normalizedMAC = $mac -replace ":", "-"
-
-        [string[]]$arpStr = [NetUtils]::GetTableEntryForIp($ip)
-        return ($arpStr | Select-String -Quiet "$normalizedMAC")
+    static [System.Net.IPAddress] GetIpOfMac(
+        [Subnet]$subnet,
+        [System.Net.NetworkInformation.PhysicalAddress]$mac,
+        [bool]$throttleForWifi = $false
+    ) {
+        return [System.Net.IPAddress](
+            Find-IpByMac `
+                -StartIp $subnet.GetFirstValidHostIp() `
+                -EndIp $subnet.GetLastValidHostIp() `
+                -Mac $mac `
+                -ThrottleForWifi $throttleForWifi)
     }
 
 }
