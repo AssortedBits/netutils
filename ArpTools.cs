@@ -47,23 +47,33 @@ public static class ArpTools
         var tcs = new TaskCompletionSource<object?>();
         int remaining = 0;
 
+        // track whether we've already logged external cancellation
+        bool externalCancelLogged = false;
+
         for (uint addr = startUInt; addr <= endUInt; addr++)
         {
-            // If pipeline token is cancelled (Ctrl-C), stop queuing new work
-            if (externalCt.IsCancellationRequested)
-                break;
-
             var ip    = FromOrderedUInt32(addr);
 
-            //Don't print from cancelled tasks
-            if (!ct.IsCancellationRequested)
+            // If pipeline token is cancelled (Ctrl-C), stop queuing new work
+            if (externalCt.IsCancellationRequested)
             {
-                int index = (int)(addr - startUInt);
-                //Print at intervals that double.
-                if (((index+1) & index) == 0)
+                if (!externalCancelLogged)
                 {
-                    Console.WriteLine($"Scanning {ip} ...");
+                    Console.WriteLine($"Cancelling before trying {ip} ...");
+                    externalCancelLogged = true;
                 }
+                break; // stop queuing new work
+            }
+
+            //Stop queueing new work if we've already succeeded.
+            if (ct.IsCancellationRequested)
+                break;
+
+            int index = (int)(addr - startUInt);
+            //Print at intervals that double.
+            if (((index+1) & index) == 0)
+            {
+                Console.WriteLine($"Scanning {ip} ...");
             }
 
             await semaphore.WaitAsync().ConfigureAwait(false);
