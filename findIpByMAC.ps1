@@ -1,4 +1,6 @@
-using module ./NetUtils.psm1   # must be before any executable code
+using module ./NetTools.psm1
+using module ./Subnet.psm1
+using module ./Misc.psm1
 
 #requires -version 7
 
@@ -14,8 +16,8 @@ class FindIpByMAC {
     static [void] ThrowIfAnythingLooksDangerous([System.Net.NetworkInformation.PhysicalAddress]$mac, [Subnet]$subnet) {
 
         [System.Net.IPAddress]$probableGatewayIp = $subnet.GetFirstValidHostIp()
-        if (-not [NetUtils]::IsIpUp($probableGatewayIp)) {
-            [NetUtils]::ComplainAndThrow("Probable gateway '$probableGatewayIp' didn't respond to ping. Since this script risks angering your IT dept if misused, we're stopping now as a precaution.")
+        if (-not [NetTools]::Ping($probableGatewayIp)) {
+            [Misc]::ComplainAndThrow("Probable gateway '$probableGatewayIp' didn't respond to ping. Since this script risks angering your IT dept if misused, we're stopping now as a precaution.")
         }
     }
 
@@ -32,7 +34,7 @@ class FindIpByMAC {
             Write-Host -NoNewline "No subnet supplied. Deducing..."
             [Subnet[]]$subnets = [Subnet]::Current()
             if ($subnets.Count -eq 0) {
-                [NetUtils]::ComplainAndThrow("no subnet supplied, and failed to deduce one automatically")
+                [Misc]::ComplainAndThrow("no subnet supplied, and failed to deduce one automatically")
             }
             $subnet = $subnets[0]
 
@@ -45,7 +47,7 @@ class FindIpByMAC {
 
         #We do a loop instead of a range, in case the range is big enough that we want to avoid
         # instantiating it as an array in memory.
-        [System.Net.IPAddress]$foundIp = [NetUtils]::GetIpOfMac($subnet, $mac, $throttleForWifi)
+        [System.Net.IPAddress]$foundIp = [NetTools]::GetIpOfMac($subnet, $mac, $throttleForWifi)
 
         if ($null -eq $foundIp) {
             Write-Host ("`Network on subnet " + $subnet.ToCIDR() + " did not respond with any IP address after ARP request for MAC address " + $mac.ToString() + ".")

@@ -1,3 +1,5 @@
+using module ./Subnet.psm1
+
 #requires -version 7
 
 $csPath = Join-Path $PSScriptRoot 'ArpTools.cs'
@@ -60,5 +62,28 @@ function Get-MacByIp {
         [ArpTools]::TrySendArp($Ip))
 }
 
-Export-ModuleMember -Function Find-IpByMac
-Export-ModuleMember -Function Get-MacByIp
+
+class ArpToolsWrapper {
+
+    static [System.Net.IPAddress] GetIpOfMac(
+        [Subnet]$subnet,
+        [System.Net.NetworkInformation.PhysicalAddress]$mac,
+        [bool]$throttleForWifi = $false
+    ) {
+        return [System.Net.IPAddress](
+            Find-IpByMac `
+                -StartIp $subnet.GetFirstValidHostIp() `
+                -EndIp $subnet.GetLastValidHostIp() `
+                -Mac $mac `
+                -ThrottleForWifi $throttleForWifi)
+    }
+
+    static [System.Net.NetworkInformation.PhysicalAddress] GetMacOfIp(
+        [System.Net.IPAddress]$ip
+    ) {
+        return [System.Net.NetworkInformation.PhysicalAddress](
+            Get-MacByIp `
+                -Ip $ip)
+    }
+
+}
